@@ -6,12 +6,11 @@ class Constant:
     # Searcher
 
     MAX_MODEL_NUM = 1000
-    BETA = 10.576
+    BETA = 2.576
     KERNEL_LAMBDA = 0.1
     T_MIN = 0.0001
     N_NEIGHBOURS = 8
-    MAX_MODEL_WIDTH = 2048
-    MAX_MODEL_DEPTH = 15
+    MAX_MODEL_SIZE = (1 << 25)
 
     # Model Defaults
 
