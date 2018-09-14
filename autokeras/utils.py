@@ -76,7 +76,7 @@ class ModelTrainer:
 
     def __init__(self, model, train_loader, test_loader, metric, loss_function, verbose):
         """Init the ModelTrainer with `model`, `x_train`, `y_train`, `x_test`, `y_test`, `verbose`"""
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.device = 'cpu' if torch.cuda.is_available() else 'cpu'
         self.model = model
         self.model.to(self.device)
         self.verbose = verbose
@@ -130,6 +130,7 @@ class ModelTrainer:
         loader = self.train_loader
 
         for batch_idx, (inputs, targets) in enumerate(deepcopy(loader)):
+            print(batch_idx)
             inputs, targets = inputs.to(self.device), targets.to(self.device)
             self.optimizer.zero_grad()
             outputs = self.model(inputs)

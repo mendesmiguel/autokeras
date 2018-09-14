@@ -1,3 +1,4 @@
+import csv
 import os
 import pickle
 import time
@@ -5,17 +6,35 @@ from abc import abstractmethod
 from functools import reduce
 
 import numpy as np
+from scipy import ndimage
 import torch
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 
+from autokeras.loss_function import classification_loss, regression_loss
+from autokeras.supervised import Supervised
 from autokeras.constant import Constant
-from autokeras.loss_function import classification_loss
-from autokeras.metric import Accuracy
+from autokeras.metric import Accuracy, MSE
 from autokeras.preprocessor import OneHotEncoder, DataTransformer
 from autokeras.search import Searcher, train
-from autokeras.supervised import Supervised
 from autokeras.utils import ensure_dir, has_file, pickle_from_file, pickle_to_file, temp_folder_generator
+from torch.utils.data import Dataset, DataLoader
+
+from autokeras.image_supervised import ImageSupervised
+
+
+def _validate(x_train, y_train):
+    """Check `x_train`'s type and the shape of `x_train`, `y_train`."""
+    try:
+        x_train = x_train.astype('float64')
+    except ValueError:
+        raise ValueError('x_train should only contain numerical data.')
+
+    if len(x_train.shape) < 2:
+        raise ValueError('x_train should at least has 2 dimensions.')
+
+    if x_train.shape[0] != y_train.shape[0]:
+        raise ValueError('x_train and y_train should have the same number of instances.')
 
 
 def run_searcher_once(train_data, test_data, path, timeout):
@@ -24,61 +43,23 @@ def run_searcher_once(train_data, test_data, path, timeout):
     searcher = pickle_from_file(os.path.join(path, 'searcher'))
     searcher.search(train_data, test_data, timeout)
 
-class TextSupervised(Supervised):
-    """The text classifier class.
 
-    Search best convolutional neural network structure for text classifier
+class CustomerDataset(Dataset):
+    def __init__(self, dataset, target):
+        self.dataset = dataset
+        self.target = target
 
-    Attributes:
-        path: A path to the directory to save the classifier.
-        verbose: A boolean value indicating the verbosity mode.
-        searcher: An instance of BayesianSearcher. It searches different
-            neural architecture to find the best model.
-        searcher_args: A dictionary containing the parameters for the searcher's __init__ function.
-        augment: A boolean value indicating whether the data needs augmentation.
-    """
+    def __getitem__(self, index):
+        return self.dataset[index], self.target[index]
 
-    def __init__(self, verbose=False, path=None, resume=False, searcher_args=None):
-        """Initialize the instance.
+    def __len__(self):
+        return len(self.dataset)
 
-        The classifier will be loaded from the files in 'path' if parameter 'resume' is True.
-        Otherwise it would create a new one.
 
-        Args:
-            verbose: A boolean of whether the search process will be printed to stdout.
-            path: A string. The path to a directory, where the intermediate results are saved.
-            resume: A boolean. If True, the classifier will continue to previous work saved in path.
-                Otherwise, the classifier will start a new search.
-        """
-        super().__init__(verbose)
-        if searcher_args is None:
-            searcher_args = {}
-
-        if path is None:
-            path = temp_folder_generator()
-
-        if has_file(os.path.join(path, 'classifier')) and resume:
-            classifier = pickle_from_file(os.path.join(path, 'classifier'))
-            self.__dict__ = classifier.__dict__
-            self.path = path
-        else:
-            self.y_encoder = None
-            self.data_transformer = None
-            self.verbose = verbose
-            self.searcher = False
-            self.path = path
-            self.searcher_args = searcher_args
-            ensure_dir(path)
-
+class TextClassifier(ImageSupervised):
     @property
-    @abstractmethod
-    def metric(self):
-        pass
-
-    @property
-    @abstractmethod
     def loss(self):
-        pass
+        return classification_loss
 
     def fit(self, x_train=None, y_train=None, time_limit=None):
         """Find the best neural architecture and train it.
@@ -98,11 +79,8 @@ class TextSupervised(Supervised):
             x_train = []
 
         x_train = np.array(x_train)
-        y_train = np.array(y_train).flatten()
 
-        self.validate(x_train, y_train)
-
-        y_train = self.transform_y(y_train)
+        _validate(x_train, y_train)
 
         # Transform x_train
         if self.data_transformer is None:
@@ -111,7 +89,7 @@ class TextSupervised(Supervised):
         # Create the searcher and save on disk
         if not self.searcher:
             input_shape = x_train.shape[1:]
-            self.searcher_args['n_output_node'] = self.get_n_output_node()
+            self.searcher_args['n_output_node'] = y_train.shape[1]
             self.searcher_args['input_shape'] = input_shape
             self.searcher_args['path'] = self.path
             self.searcher_args['metric'] = self.metric
@@ -127,7 +105,11 @@ class TextSupervised(Supervised):
                                                                           int(len(y_train) * 0.2)),
                                                             random_state=42)
 
+        # batch_size = Constant.MAX_BATCH_SIZE
+        batch_size = 1
         # Wrap the data into DataLoaders
+        # train_data = DataLoader(CustomerDataset(x_train, y_train), batch_size=batch_size, shuffle=True)
+        # test_data = DataLoader(CustomerDataset(x_test, y_test), batch_size=batch_size, shuffle=True)
         train_data = self.data_transformer.transform_train(x_train, y_train)
         test_data = self.data_transformer.transform_test(x_test, y_test)
 
@@ -156,112 +138,11 @@ class TextSupervised(Supervised):
             elif self.verbose:
                 print('Time is out.')
 
-    @abstractmethod
-    def get_n_output_node(self):
-        pass
-
-    def transform_y(self, y_train):
-        return y_train
-
-    def predict(self, x_test):
-        """Return predict results for the testing data.
-
-        Args:
-            x_test: An instance of numpy.ndarray containing the testing data.
-
-        Returns:
-            A numpy.ndarray containing the results.
-        """
-        if Constant.LIMIT_MEMORY:
-            pass
-        test_loader = self.data_transformer.transform_test(x_test)
-        model = self.load_searcher().load_best_model().produce_model()
-        model.eval()
-
-        outputs = []
-        with torch.no_grad():
-            for index, inputs in enumerate(test_loader):
-                outputs.append(model(inputs).numpy())
-        output = reduce(lambda x, y: np.concatenate((x, y)), outputs)
-        return self.inverse_transform_y(output)
-
-    def inverse_transform_y(self, output):
-        return output
-
-    def evaluate(self, x_test, y_test):
-        """Return the accuracy score between predict value and `y_test`."""
-        y_predict = self.predict(x_test)
-        return accuracy_score(y_test, y_predict)
-
-    def save_searcher(self, searcher):
-        pickle.dump(searcher, open(os.path.join(self.path, 'searcher'), 'wb'))
-
-    def load_searcher(self):
-        return pickle_from_file(os.path.join(self.path, 'searcher'))
-
-    def final_fit(self, x_train, y_train, x_test, y_test, trainer_args=None, retrain=False):
-        """Final training after found the best architecture.
-
-        Args:
-            x_train: A numpy.ndarray of training data.
-            y_train: A numpy.ndarray of training targets.
-            x_test: A numpy.ndarray of testing data.
-            y_test: A numpy.ndarray of testing targets.
-            trainer_args: A dictionary containing the parameters of the ModelTrainer constructor.
-            retrain: A boolean of whether reinitialize the weights of the model.
-        """
-        if trainer_args is None:
-            trainer_args = {'max_no_improvement_num': 30}
-
-        y_train = self.transform_y(y_train)
-        y_test = self.transform_y(y_test)
-
-        train_data = self.data_transformer.transform_train(x_train, y_train)
-        test_data = self.data_transformer.transform_test(x_test, y_test)
-
-        searcher = self.load_searcher()
-        graph = searcher.load_best_model()
-
-        if retrain:
-            graph.weighted = False
-        _, _1, graph = train((graph, train_data, test_data, trainer_args, None, self.metric, self.loss, self.verbose))
-
-    def get_best_model_id(self):
-        """ Return an integer indicating the id of the best model."""
-        return self.load_searcher().get_best_model_id()
-
-    def validate(x_train, y_train):
-        """Check `x_train`'s type and the shape of `x_train`, `y_train`."""
-        try:
-            x_train = x_train.astype('float64')
-        except ValueError:
-            raise ValueError('x_train should only contain numerical data.')
-
-        if len(x_train.shape) < 2:
-            raise ValueError('x_train should at least has 2 dimensions.')
-
-        if x_train.shape[0] != y_train.shape[0]:
-            raise ValueError('x_train and y_train should have the same number of instances.')
-
-
-class TextClassifier(TextSupervised):
-    @property
-    def loss(self):
-        return classification_loss
-
-    def transform_y(self, y_train):
-        # Transform y_train.
-        if self.y_encoder is None:
-            self.y_encoder = OneHotEncoder()
-            self.y_encoder.fit(y_train)
-        y_train = self.y_encoder.transform(y_train)
-        return y_train
-
     def inverse_transform_y(self, output):
         return self.y_encoder.inverse_transform(output)
 
     def get_n_output_node(self):
-        return self.y_encoder.n_classes
+        pass
 
     @property
     def metric(self):
