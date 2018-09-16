@@ -116,3 +116,6 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+examples/text_cnn/labeledTrainData.tsv
+examples/text_cnn/glove_embedding/
