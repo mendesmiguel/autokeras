@@ -117,5 +117,7 @@ venv.bak/
 # mypy
 .mypy_cache/
 
+# remove some example dataset
 examples/text_cnn/labeledTrainData.tsv
 examples/text_cnn/glove_embedding/
+examples/load_raw_image_data.zip
