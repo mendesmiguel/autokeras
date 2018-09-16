@@ -61,7 +61,7 @@ class TextClassifier(ImageSupervised):
     def loss(self):
         return classification_loss
 
-    def fit(self, x_train=None, y_train=None, time_limit=None):
+    def fit(self, x_train=None, y_train=None, batch_size=None , time_limit=None):
         """Find the best neural architecture and train it.
 
         Based on the given dataset, the function will find the best neural architecture for it.
@@ -105,13 +105,12 @@ class TextClassifier(ImageSupervised):
                                                                           int(len(y_train) * 0.2)),
                                                             random_state=42)
 
-        # batch_size = Constant.MAX_BATCH_SIZE
         batch_size = 1
         # Wrap the data into DataLoaders
-        # train_data = DataLoader(CustomerDataset(x_train, y_train), batch_size=batch_size, shuffle=True)
-        # test_data = DataLoader(CustomerDataset(x_test, y_test), batch_size=batch_size, shuffle=True)
-        train_data = self.data_transformer.transform_train(x_train, y_train)
-        test_data = self.data_transformer.transform_test(x_test, y_test)
+        x_train_transpose = torch.Tensor(x_train.transpose(0, 3, 1, 2))
+        x_test_transpose = torch.Tensor(x_test.transpose(0, 3, 1, 2))
+        train_data = DataLoader(CustomerDataset(x_train_transpose, y_train), batch_size=batch_size, shuffle=True)
+        test_data = DataLoader(CustomerDataset(x_test, y_test), batch_size=batch_size, shuffle=True)
 
         # Save the classifier
         pickle.dump(self, open(os.path.join(self.path, 'classifier'), 'wb'))

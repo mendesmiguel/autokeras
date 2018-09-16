@@ -11,7 +11,14 @@ from keras.utils.np_utils import to_categorical
 import sys
 from autokeras import TextClassifier, ImageClassifier
 
-MAX_SEQUENCE_LENGTH = 10
+## Example dataset can be download here:
+# wget https://www.kaggle.com/c/word2vec-nlp-tutorial/download/labeledTrainData.tsv
+
+# Example embedding pretrain can be download here:
+# wget http://nlp.stanford.edu/data/glove.6B.zip
+
+
+MAX_SEQUENCE_LENGTH = 1000
 MAX_NB_WORDS = 20000
 EMBEDDING_DIM = 100
 
